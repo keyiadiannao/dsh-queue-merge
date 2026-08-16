@@ -7,6 +7,7 @@
  * The choice is POSTed to the host per-session; the host's agent/pre-step hook
  * reads it at the turn boundary.
  */
+import { useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { NS } from './index.ts'
@@ -43,19 +44,32 @@ const POLICY = '/api/dsh-queue-merge/policy'
  * zero footprint when idle. */
 export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   const { t, session } = props
+  const [mode, setModeState] = useState<'merge' | 'individually'>('merge')
   const queued = session.queue.filter(q => q.placement === 'queued')
   if (!session.running || queued.length === 0) return null
 
   const sessionId = props.sessionId ?? (session as { id?: string }).id ?? ''
 
-  const setMode = (mode: 'merge' | 'individually'): void => {
+  const setMode = (next: 'merge' | 'individually'): void => {
+    setModeState(next)
     if (sessionId === '') return
     void fetch(POLICY, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId, mode }),
+      body: JSON.stringify({ sessionId, mode: next }),
     }).catch(() => { /* non-fatal: falls back to default */ })
   }
+
+  const modeBtnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '3px 10px',
+    borderRadius: 6,
+    border: '1px solid var(--dsw-alias-border-l3, rgba(128,128,128,0.3))',
+    background: active ? 'var(--dsw-alias-button-primary-dimmed, rgba(65,118,230,0.2))' : 'transparent',
+    color: active ? 'var(--dsw-alias-label-primary, #f2f6fc)' : 'var(--dsw-alias-label-secondary, #aab2c0)',
+    font: 'inherit',
+    fontSize: 12,
+    cursor: 'pointer',
+  })
 
   return (
     <div
@@ -77,22 +91,13 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
         {t('queueCount').replace('{n}', String(queued.length))}
       </span>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {t('willMerge')}
+        {mode === 'merge' ? t('willMerge') : t('willIndividually')}
       </span>
       <button
         type="button"
         title={t('mergeHint')}
         onClick={() => setMode('merge')}
-        style={{
-          padding: '3px 10px',
-          borderRadius: 6,
-          border: '1px solid var(--dsw-alias-border-l3, rgba(128,128,128,0.3))',
-          background: 'var(--dsw-alias-button-primary-dimmed, rgba(65,118,230,0.2))',
-          color: 'var(--dsw-alias-label-primary, #f2f6fc)',
-          font: 'inherit',
-          fontSize: 12,
-          cursor: 'pointer',
-        }}
+        style={modeBtnStyle(mode === 'merge')}
       >
         {t('merge')}
       </button>
@@ -100,16 +105,7 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
         type="button"
         title={t('individuallyHint')}
         onClick={() => setMode('individually')}
-        style={{
-          padding: '3px 10px',
-          borderRadius: 6,
-          border: '1px solid var(--dsw-alias-border-l3, rgba(128,128,128,0.3))',
-          background: 'transparent',
-          color: 'var(--dsw-alias-label-secondary, #aab2c0)',
-          font: 'inherit',
-          fontSize: 12,
-          cursor: 'pointer',
-        }}
+        style={modeBtnStyle(mode === 'individually')}
       >
         {t('individually')}
       </button>
