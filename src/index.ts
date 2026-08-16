@@ -110,15 +110,6 @@ export interface QueuePolicy {
 export function apply(ctx: any, config: Config): void {
   const policies = new Map<string, QueuePolicy>()
 
-  ctx.set('queueMerge', {
-    setPolicy(sessionId: string, mode: 'merge' | 'individually'): void {
-      policies.set(sessionId, { mode })
-    },
-    getPolicy(sessionId: string): 'merge' | 'individually' {
-      return policies.get(sessionId)?.mode ?? config.defaultMode
-    },
-  })
-
   // Client policy switch: POST /api/dsh-queue-merge/policy { sessionId, mode }.
   // Same-origin guard (loopback + Host check) like the official trust fence —
   // this only flips a per-session mode, but keep the destructive-style fence
