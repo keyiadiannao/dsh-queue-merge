@@ -1,7 +1,26 @@
 {
   "name": "dsh-queue-merge",
   "version": "0.1.0",
-  "description": "Queue Coalescing for DeepSeek Harness: when the agent is busy and the user queues multiple follow-up messages, merge them into one synthesized intent brief before the next turn executes — reducing rework from piecemeal corrections.",
+  "description": "Queue Consolidation for DeepSeek Harness: when the agent is busy and you queue several follow-up messages, the next turn runs with ONE consolidated formal prompt — the model rewrites the batch into a single prompt and executes once, instead of piecemeal one-message-per-turn rework.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "queue",
+    "message-queue",
+    "merge",
+    "consolidation",
+    "ai-agent",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keyiadiannao/dsh-queue-merge.git"
+  },
+  "homepage": "https://github.com/keyiadiannao/dsh-queue-merge",
+  "bugs": {
+    "url": "https://github.com/keyiadiannao/dsh-queue-merge/issues"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

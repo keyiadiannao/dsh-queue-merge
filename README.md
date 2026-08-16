@@ -1,9 +1,9 @@
 # dsh-queue-merge
 
-**Queue Coalescing for DeepSeek Harness** — when the agent is busy and you keep
-queuing follow-up messages, merge them into one synthesized intent brief before
-the next turn executes, instead of the agent processing them one message per
-turn (do a bit → get corrected → redo → get corrected again).
+**Queue Consolidation for DeepSeek Harness** — when the agent is busy and you
+queue several follow-up messages, the next turn runs with **one consolidated
+formal prompt** instead of the agent replaying your messages one by one
+(do a bit → get corrected → redo → get corrected again).
 
 ## Why
 
@@ -22,49 +22,46 @@ adds a third queue-consumption policy:
 
 ```text
 queue individually   (official default: one message per turn)
-queue + merge        (this plugin: synthesize the batch, execute once)
+queue + merge        (this plugin: consolidate the batch, execute once)
 ```
 
 ## How it works
 
 ```text
-agent busy + messages queued
+agent busy, user queues 2+ messages
         ↓
-composer-dock policy bar:  [合并处理]  [逐条处理]
+policy strip above the composer:  [合并处理]  [逐条处理]   (shown only when 2+ queued)
         ↓  (merge)
 agent/pre-step hook at the turn boundary
         ↓
-freeze the whole queued batch (durable inbox splice)
+call the SAME model that will execute to consolidate the whole batch
+into ONE clean, complete, formal user prompt
+        ↓   (success)
+durable splice removes the queued messages; the consolidated prompt
+REPLACES them as the turn's user message (full visible bubble)
         ↓
-one lightweight intent-synthesis LLM call (fixed JSON schema)
-        ↓
-execution turn receives:  ALL original messages  +  advisory brief
+agent executes the consolidated prompt once
 ```
 
-**Authority model (instruction-hierarchy inspired):** the original queued user
-messages are always authoritative. The synthesis brief is a derived planning
-artifact — advisory only, never a prompt rewrite, and never permitted to widen
-permissions. If synthesis fails, the plugin degrades gracefully to the official
-one-message-per-turn behavior.
+Key properties:
 
-The synthesis prompt emits a fixed schema:
-
-```json
-{
-  "primaryGoal": "...",
-  "requirements": [],
-  "constraints": [],
-  "corrections": [],
-  "superseded": [],
-  "conflicts": [],
-  "independentRequests": [],
-  "recommendedExecutionPlan": []
-}
-```
-
-It detects corrections ("last explicit correction wins" only on semantic
-conflict), cancelled requests, constraints, and independent requests that
-should NOT be forced into one task.
+- **Consolidation, not a side-note.** The queued messages are rewritten into a
+  single new official user prompt — the agent acts on the consolidated version,
+  and the raw messages do not appear in the turn. Corrections win over earlier
+  messages on the same thing; unrelated requests are kept as separate points.
+- **Zero loss by construction.** The consolidation LLM call runs BEFORE the
+  inbox is touched. If it fails, the queued messages stay put and the official
+  one-message-per-turn loop takes over — nothing is ever spliced out and dropped.
+- **No over-splice races.** The pending list is snapshotted at hook entry;
+  messages that arrive mid-consolidation stay queued for the next turn.
+- **Language follows the UI.** The client reports the active locale; the
+  consolidated prompt is written in the UI language (zh → Simplified Chinese,
+  en → English), falling back to the message language when unknown.
+- **One hard line:** the consolidation never invents permissions the user did
+  not state, so merging cannot widen the agent's authority.
+- **Interruptible UI.** The policy strip only appears when there are 2+ queued
+  messages (with one, merge is a no-op) and sits in the composer's input dock
+  right under the native queue dock.
 
 ## Install
 
@@ -88,7 +85,7 @@ And to `dsh.profile.bundles`: `"dsh-queue-merge"`.
 - id: dsh-queue-merge
   config:
     defaultMode: merge          # merge | individually
-    minQueueForMerge: 2         # batch size threshold before merging applies
+    minQueueForMerge: 2         # claimed + queued threshold before merging applies
     synthesisProvider: ''       # empty = reuse the session's routed model
     synthesisModel: ''
 ```
@@ -96,9 +93,9 @@ And to `dsh.profile.bundles`: `"dsh-queue-merge"`.
 ## Development
 
 ```sh
-npm run build        # tsdown: host + client bundle
-npm run typecheck    # tsc --noEmit
-npm test             # vitest
+pnpm run build        # tsdown: host + client bundle (CSS Modules inlined)
+pnpm run typecheck    # tsc --noEmit
+pnpm test             # vitest
 ```
 
 ## Relationship to the ecosystem
