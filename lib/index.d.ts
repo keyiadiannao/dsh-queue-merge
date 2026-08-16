@@ -24,9 +24,10 @@ interface QueuePolicy {
  * Apply: register the agent/pre-step hook that implements merge mode.
  * The hook is deliberately conservative:
  *  - merge applies only when (a) policy is merge AND (b) queued+claimed count
- *    is >= minQueueForMerge AND (c) more than one user message is entering.
- *  - synthesis failures degrade gracefully to the official behavior (the
- *    original messages still enter, unmodified).
+ *    is >= minQueueForMerge.
+ *  - consolidation runs BEFORE any inbox mutation: a failed consolidation
+ *    degrades gracefully to the official one-message-per-turn behavior with
+ *    zero loss (nothing has been spliced yet).
  */
 declare function apply(ctx: any, config: Config): void;
 //#endregion

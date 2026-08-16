@@ -85,11 +85,16 @@ Integrate them into ONE coherent, complete, directly executable user prompt:
 - Order related steps sensibly; list unrelated requests as separate numbered
   points and keep all of them.
 - Do not invent requirements, tasks, or permissions the user did not state.
-- Write in the same language as the user's messages.
 - Output ONLY the consolidated prompt text — no preamble, no explanation, no JSON.
-
-QUEUED USER MESSAGES:
 `
+
+/** Map the UI locale reported by the client to a language directive for the
+ * consolidation model. No known locale → follow the user's message language. */
+function localeDirective(locale: string | undefined): string {
+  if (locale === 'zh') return 'Simplified Chinese (中文)'
+  if (locale === 'en') return 'English'
+  return 'the same language as the user\'s messages'
+}
 
 /** Source marker for the consolidated wake message. `kind: 'user'` makes the
  * UI render it as a full, visible user bubble (source.kind !== 'user' would
@@ -97,9 +102,12 @@ QUEUED USER MESSAGES:
  * prompt from the user — which is exactly what we must not do). */
 const SYNTHESIS_SOURCE = { kind: 'user' } as const
 
-/** Per-session queue policy, switchable from the client while busy. */
+/** Per-session queue policy + UI locale, switchable from the client while busy. */
 export interface QueuePolicy {
   mode: 'merge' | 'individually'
+  /** Active UI locale ('zh' | 'en') reported by the client — the language the
+   * consolidated prompt is written in. Undefined → follow the user messages. */
+  locale?: string
 }
 
 /**
@@ -152,16 +160,20 @@ export function apply(ctx: any, config: Config): void {
         return
       }
       try {
-        const body = JSON.parse(await readBody(req)) as { sessionId?: string; mode?: string }
+        const body = JSON.parse(await readBody(req)) as { sessionId?: string; mode?: string; locale?: string }
         if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
           res.writeHead(400, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'missing sessionId' }))
           return
         }
         const mode = body.mode === 'individually' ? 'individually' : body.mode === 'merge' ? 'merge' : config.defaultMode
-        policies.set(body.sessionId, { mode })
+        const prev = policies.get(body.sessionId)
+        const locale = typeof body.locale === 'string' && body.locale.length > 0
+          ? body.locale
+          : prev?.locale
+        policies.set(body.sessionId, { mode, ...locale === undefined ? {} : { locale } })
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, sessionId: body.sessionId, mode }))
+        res.end(JSON.stringify({ ok: true, sessionId: body.sessionId, mode, ...locale === undefined ? {} : { locale } }))
       } catch (e) {
         res.writeHead(500, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : 'bad request' }))
@@ -202,7 +214,7 @@ export function apply(ctx: any, config: Config): void {
     // call fails, the pending messages stay queued and the official loop keeps
     // processing them one per turn — nothing is ever dropped.
     const all = [...messages, ...pendingSnapshot]
-    const consolidated = await synthesizeBrief(ctx, agent, all, config, signal)
+    const consolidated = await synthesizeBrief(ctx, agent, all, config, signal, policy.locale)
     // eslint-disable-next-line no-console
     console.log(`[dsh-queue-merge] consolidated=${consolidated === null ? 'FAILED(null)' : `ok(${consolidated.length} chars)`}`)
     if (consolidated === null) return downstream // consolidation failed → official behavior, zero loss
@@ -253,6 +265,7 @@ async function synthesizeBrief(
   messages: readonly { content: unknown; id?: unknown }[],
   config: Config,
   signal?: AbortSignal,
+  locale?: string,
 ): Promise<string | null> {
   try {
     const latest = agent.session.requestHeader?.()?.config
@@ -282,8 +295,10 @@ async function synthesizeBrief(
 
     const promptMessages = [
       createUserMessage({
-        // SYNTHESIS_INSTRUCTION already ends with "QUEUED USER MESSAGES:".
-        content: [{ type: 'text', text: `${SYNTHESIS_INSTRUCTION}\n${userBlocks}` }],
+        content: [{
+          type: 'text',
+          text: `${SYNTHESIS_INSTRUCTION}\nLanguage: write the consolidated prompt in ${localeDirective(locale)}.\n\nQUEUED USER MESSAGES:\n${userBlocks}`,
+        }],
         source: SYNTHESIS_SOURCE,
       }),
     ]

@@ -1,0 +1,84 @@
+/**
+ * QueuePolicyBar styles — DSH design-token based, matching the composer's
+ * dark chrome (all colors fall back to explicit values on non-DSH hosts).
+ */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-mask-3, rgba(14, 18, 28, 0.6));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.18));
+  color: var(--dsw-alias-label-secondary, #aab2c0);
+  font-family: var(--dsw-font-family, ui-sans-serif, system-ui, sans-serif);
+  font-size: 12px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+/* Pulsing accent dot: draws the eye while the agent is busy. */
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--dsw-alias-state-business-primary, #4f7cff);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 45%, transparent);
+  animation: pulse 1.8s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 45%, transparent); }
+  70% { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Segmented control for the two consumption modes. */
+.segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(22, 26, 36, 0.8));
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.22));
+}
+
+.option {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #aab2c0);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.option:hover {
+  color: var(--dsw-alias-label-primary, #f2f6fc);
+}
+
+.active {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 22%, transparent);
+  color: var(--dsw-alias-label-primary, #f2f6fc);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7cff) 45%, transparent) inset;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot { animation: none; }
+  .option { transition: none; }
+}

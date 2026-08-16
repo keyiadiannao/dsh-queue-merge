@@ -28,12 +28,16 @@ export function apply(ctx: ClientContext): void {
 
   // The native queue dock registers at order 20; the policy bar follows it at
   // order 30 so the user first sees the queued messages, then decides how the
-  // batch will be processed.
+  // batch will be processed. The active UI locale rides along so the host can
+  // write the consolidated prompt in the user's language.
   ctx.slots.inject('conversation.input.dock', () =>
     ctx.slots.register({
       name: 'conversation.input.dock',
       id: 'dsh-queue-merge-policy',
       order: 30,
       locale: NS,
+      inject: () => ({
+        locale: (ctx.locale as { getLocale?: () => { active?: string } }).getLocale?.()?.active ?? 'zh',
+      }),
     }, QueuePolicyBar))
 }

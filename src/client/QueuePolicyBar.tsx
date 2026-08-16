@@ -5,13 +5,14 @@
  * will be consumed when the current task ends:
  *   merge        → intent synthesis, one combined execution (this plugin)
  *   individually → official one-message-per-turn behavior
- * The choice is POSTed to the host per-session; the host's agent/pre-step hook
- * reads it at the turn boundary.
+ * The choice AND the active UI locale are POSTed to the host per-session; the
+ * host's agent/pre-step hook uses the locale for the consolidation language.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { NS } from './index.ts'
+import css from './QueuePolicyBar.module.css'
 
 /** Inline queue row shape (subset of the runtime's QueuedMessage). */
 export interface QueueRow {
@@ -36,7 +37,7 @@ export type QueuePolicyBarProps =
   PropsRuntime<'conversation.input.dock'>
   & QueueInputZone
   & PropsLocale<typeof NS>
-  & { sessionId?: string }
+  & { sessionId?: string; locale?: string }
 
 /** Policy endpoint on the host. */
 const POLICY = '/api/dsh-queue-merge/policy'
@@ -50,6 +51,19 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   if (!session.running || queued.length === 0) return null
 
   const sessionId = props.sessionId ?? (session as { id?: string }).id ?? ''
+  const locale = props.locale ?? 'zh'
+
+  // Report the active UI locale as soon as the bar appears, so the host knows
+  // which language the consolidated prompt should be written in — even when
+  // the user never clicks a mode button.
+  useEffect(() => {
+    if (sessionId === '') return
+    void fetch(POLICY, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId, locale }),
+    }).catch(() => { /* non-fatal: consolidation falls back to message-language */ })
+  }, [sessionId, locale])
 
   const setMode = (next: 'merge' | 'individually'): void => {
     setModeState(next)
@@ -57,56 +71,36 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
     void fetch(POLICY, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId, mode: next }),
+      body: JSON.stringify({ sessionId, mode: next, locale }),
     }).catch(() => { /* non-fatal: falls back to default */ })
   }
 
-  const modeBtnStyle = (active: boolean): React.CSSProperties => ({
-    padding: '3px 10px',
-    borderRadius: 6,
-    border: '1px solid var(--dsw-alias-border-l3, rgba(128,128,128,0.3))',
-    background: active ? 'var(--dsw-alias-button-primary-dimmed, rgba(65,118,230,0.2))' : 'transparent',
-    color: active ? 'var(--dsw-alias-label-primary, #f2f6fc)' : 'var(--dsw-alias-label-secondary, #aab2c0)',
-    font: 'inherit',
-    fontSize: 12,
-    cursor: 'pointer',
-  })
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '6px 12px',
-        borderRadius: 8,
-        background: 'var(--dsw-alias-bg-layer-2, rgba(24,28,38,0.6))',
-        border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2))',
-        color: 'var(--dsw-alias-label-secondary, #aab2c0)',
-        fontFamily: 'var(--dsw-font-family, ui-sans-serif, system-ui, sans-serif)',
-        fontSize: 12,
-        lineHeight: 1.5,
-      }}
-    >
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+    <div className={css.bar}>
+      <span className={css.dot} aria-hidden="true" />
+      <span className={css.hint} title={mode === 'merge' ? t('mergeHint') : t('individuallyHint')}>
         {mode === 'merge' ? t('willMerge') : t('willIndividually')}
       </span>
-      <button
-        type="button"
-        title={t('mergeHint')}
-        onClick={() => setMode('merge')}
-        style={modeBtnStyle(mode === 'merge')}
-      >
-        {t('merge')}
-      </button>
-      <button
-        type="button"
-        title={t('individuallyHint')}
-        onClick={() => setMode('individually')}
-        style={modeBtnStyle(mode === 'individually')}
-      >
-        {t('individually')}
-      </button>
+      <span className={css.segmented} role="group" aria-label={t('policyTitle')}>
+        <button
+          type="button"
+          className={mode === 'merge' ? `${css.option} ${css.active}` : css.option}
+          title={t('mergeHint')}
+          aria-pressed={mode === 'merge'}
+          onClick={() => setMode('merge')}
+        >
+          {t('merge')}
+        </button>
+        <button
+          type="button"
+          className={mode === 'individually' ? `${css.option} ${css.active}` : css.option}
+          title={t('individuallyHint')}
+          aria-pressed={mode === 'individually'}
+          onClick={() => setMode('individually')}
+        >
+          {t('individually')}
+        </button>
+      </span>
     </div>
   )
 }
