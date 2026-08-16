@@ -16,9 +16,12 @@ interface Config {
 }
 /** Schemastery schema; cordis validates and provides it as apply(ctx, config). */
 declare const Config: z<Config>;
-/** Per-session queue policy, switchable from the client while busy. */
+/** Per-session queue policy + UI locale, switchable from the client while busy. */
 interface QueuePolicy {
   mode: 'merge' | 'individually';
+  /** Active UI locale ('zh' | 'en') reported by the client — the language the
+   * consolidated prompt is written in. Undefined → follow the user messages. */
+  locale?: string;
 }
 /**
  * Apply: register the agent/pre-step hook that implements merge mode.
