@@ -77,8 +77,11 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   }
 
   return (
-    <div className={css.bar}>
-      <span className={css.dot} aria-hidden="true" />
+    <div className={css.root}>
+      <span className={css.lead} aria-hidden="true">
+        <span className={css.dot} />
+      </span>
+      <span className={css.title}>{t('policyTitle')}</span>
       <span className={css.hint} title={mode === 'merge' ? t('mergeHint') : t('individuallyHint')}>
         {mode === 'merge' ? t('willMerge') : t('willIndividually')}
       </span>
