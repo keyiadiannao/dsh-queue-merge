@@ -12,6 +12,8 @@ export const zh = {
   queueCount: '{n} 条排队消息',
   willMerge: '当前任务结束后将合并处理这批消息',
   willIndividually: '当前任务结束后将逐条处理这批消息',
+  merged: '已合并 {n} 条后续消息',
+  originalsTitle: '原始消息',
 } as const
 
 export const en = {
@@ -23,4 +25,6 @@ export const en = {
   queueCount: '{n} queued messages',
   willMerge: 'Will merge this batch after the current task ends',
   willIndividually: 'Will process this batch one message per turn',
+  merged: 'Merged {n} follow-up messages',
+  originalsTitle: 'Original messages',
 } as const

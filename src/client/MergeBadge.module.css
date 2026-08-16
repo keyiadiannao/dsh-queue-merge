@@ -1,0 +1,87 @@
+/* Merge provenance badge — native strip language, aligned under the
+   consolidated user bubble. */
+
+.badge {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 2px auto 0;
+  padding: 6px 12px;
+  width: calc(
+    100% -
+    var(--dsh-composer-side-clearance, 0px) -
+    var(--dsh-composer-side-clearance, 0px) -
+    var(--dsh-composer-dock-inset, 0px) -
+    var(--dsh-composer-dock-inset, 0px)
+  );
+  max-width: calc(
+    var(--dsh-composer-card-max-width, 720px) -
+    var(--dsh-composer-dock-inset, 0px) -
+    var(--dsh-composer-dock-inset, 0px)
+  );
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.15));
+  border-radius: 10px;
+  background: var(--dsw-specific-tip, rgba(20, 24, 34, 0.75));
+  font-family: Inter, var(--dsw-font-family, ui-sans-serif, system-ui, sans-serif);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary, #8b93a5);
+  user-select: none;
+}
+
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--dsw-alias-label-secondary, #aab2c0);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.summary:hover {
+  color: var(--dsw-alias-label-primary, #f2f6fc);
+}
+
+.summary:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-tertiary, #8b93a5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.lead {
+  display: inline-block;
+  margin-right: 4px;
+  color: var(--dsw-alias-state-business-primary, #4f7cff);
+}
+
+.toggle {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary, #8b93a5);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 0 0 10px;
+  list-style: none;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.12));
+}
+
+.item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary, #8b93a5);
+  font-size: 12px;
+}

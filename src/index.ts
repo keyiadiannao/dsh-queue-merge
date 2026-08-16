@@ -96,11 +96,51 @@ function localeDirective(locale: string | undefined): string {
   return 'the same language as the user\'s messages'
 }
 
-/** Source marker for the consolidated wake message. `kind: 'user'` makes the
- * UI render it as a full, visible user bubble (source.kind !== 'user' would
- * render as a collapsed "context injection" tag, hiding the consolidated
- * prompt from the user — which is exactly what we must not do). */
-const SYNTHESIS_SOURCE = { kind: 'user' } as const
+/** Extract the plain-text of one message's content blocks. */
+function textOf(m: { content?: unknown }): string {
+  const content = m.content
+  if (!Array.isArray(content)) return String(content ?? '')
+  return content
+    .map((b) => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text'
+      ? (b as { text?: string }).text ?? ''
+      : '')
+    .join('\n')
+}
+
+/** Read a message's durable id (undefined when absent). */
+function messageId(m: { id?: unknown }): unknown {
+  return m.id
+}
+
+/**
+ * A message may be merged only when it is a real human user message made of
+ * text blocks: plugin/system sources (e.g. a schedule_reminder wake) and
+ * non-text content (images, files) must never be rewritten or dropped.
+ */
+function isMergeable(m: { content?: unknown; source?: { kind?: string } }): boolean {
+  if (m.source !== undefined && m.source.kind !== 'user') return false
+  const content = m.content
+  if (!Array.isArray(content)) return true
+  return content.every((b) => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text')
+}
+
+/**
+ * Build the merged message's source: `kind: 'user'` keeps the consolidated
+ * prompt rendered as a full, visible user bubble (a plugin source would render
+ * as a collapsed "context injection" tag), while the extra fields carry the
+ * merge provenance for the client UI — how many messages were merged and the
+ * ORIGINAL texts, so "view originals" stays possible even though the raw
+ * messages were spliced out of the queue.
+ */
+function mergedSource(messages: readonly { content?: unknown }[]): { kind: 'user' } {
+  const originals = messages.map(textOf).filter((t) => t.length > 0)
+  return {
+    kind: 'user',
+    plugin: 'dsh-queue-merge',
+    mergedCount: messages.length,
+    originals,
+  } as unknown as { kind: 'user' }
+}
 
 /** Per-session queue policy + UI locale, switchable from the client while busy. */
 export interface QueuePolicy {
@@ -122,19 +162,14 @@ export interface QueuePolicy {
 export function apply(ctx: any, config: Config): void {
   const policies = new Map<string, QueuePolicy>()
 
-  // Client policy switch: POST /api/dsh-queue-merge/policy { sessionId, mode }.
-  // Same-origin guard (loopback + Host check) like the official trust fence —
-  // this only flips a per-session mode, but keep the destructive-style fence
-  // for consistency with other mutation POSTs.
+  // Policy endpoint: GET (client reads the single source of truth for
+  // defaultMode / currentMode / minQueueForMerge) and POST (client switches
+  // the per-session mode + reports the UI locale). Loopback + Host + Origin +
+  // Sec-Fetch-Site fence like the official trust fence.
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: BASE,
     handler: async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
-      if (req.method !== 'POST') {
-        res.writeHead(405, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: 'method not allowed' }))
-        return
-      }
       const address = req.socket?.remoteAddress
       if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1') {
         res.writeHead(403, { 'content-type': 'application/json' })
@@ -159,6 +194,53 @@ export function apply(ctx: any, config: Config): void {
         res.end(JSON.stringify({ ok: false, error: 'forbidden: bad host' }))
         return
       }
+      // Browser-origin fence: a cross-origin page must not be able to mutate
+      // the policy through a safelisted text/plain POST (no CORS preflight).
+      const origin = req.headers.origin
+      if (origin !== undefined && origin !== 'null') {
+        try {
+          const ohn = new URL(origin).hostname
+          if (ohn !== '127.0.0.1' && ohn !== '::1' && ohn !== '[::1]' && ohn !== 'localhost') {
+            res.writeHead(403, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'forbidden: bad origin' }))
+            return
+          }
+        } catch {
+          res.writeHead(403, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'forbidden: bad origin' }))
+          return
+        }
+      }
+      const secFetchSite = req.headers['sec-fetch-site']
+      if (secFetchSite !== undefined && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
+        res.writeHead(403, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'forbidden: cross-site fetch' }))
+        return
+      }
+
+      // GET: single source of truth for the client policy strip.
+      if (req.method === 'GET') {
+        let sessionId = ''
+        try {
+          sessionId = new URL(req.url ?? '/', 'http://localhost').searchParams.get('sessionId') ?? ''
+        } catch { /* keep '' */ }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          ok: true,
+          sessionId,
+          defaultMode: config.defaultMode,
+          mode: sessionId !== '' ? (policies.get(sessionId)?.mode ?? config.defaultMode) : config.defaultMode,
+          minQueueForMerge: config.minQueueForMerge,
+        }))
+        return
+      }
+
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'method not allowed' }))
+        return
+      }
+
       try {
         const body = JSON.parse(await readBody(req)) as { sessionId?: string; mode?: string; locale?: string }
         if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
@@ -215,10 +297,38 @@ export function apply(ctx: any, config: Config): void {
     // call fails, the pending messages stay queued and the official loop keeps
     // processing them one per turn — nothing is ever dropped.
     const all = [...messages, ...pendingSnapshot]
+
+    // Guard 1 — attachments & non-human sources: merging must NEVER rewrite
+    // image/file blocks (they cannot survive a text-only consolidated prompt)
+    // or plugin/system-sourced messages (e.g. a schedule_reminder wake).
+    // If the batch contains any of those, skip merging entirely and let the
+    // official one-message-per-turn loop handle them.
+    if (!all.every(isMergeable)) {
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-queue-merge] batch contains non-text or non-user-source messages (${all.length}) — skipping merge`)
+      return downstream
+    }
+
     const consolidated = await synthesizeBrief(ctx, agent, all, config, signal, policyEntry?.locale)
     // eslint-disable-next-line no-console
     console.log(`[dsh-queue-merge] consolidated=${consolidated === null ? 'FAILED(null)' : `ok(${consolidated.length} chars)`}`)
     if (consolidated === null) return downstream // consolidation failed → official behavior, zero loss
+
+    // Guard 2 — queue identity: the user may edit / delete / reorder the queue
+    // (e.g. via dsh-queue-plus) WHILE the consolidation LLM call is in flight.
+    // Splice by count alone could then remove messages that were NOT part of
+    // this synthesis. Only splice when the live queue's prefix still matches
+    // the exact snapshotted ids; otherwise abort the merge.
+    const live = inbox?.nextTurn ?? []
+    const liveIds = live.slice(0, pendingSnapshot.length).map(messageId)
+    const snapIds = pendingSnapshot.map(messageId)
+    const samePrefix = snapIds.length === liveIds.length
+      && snapIds.every((id, i) => id !== undefined && id === liveIds[i])
+    if (!samePrefix) {
+      // eslint-disable-next-line no-console
+      console.log('[dsh-queue-merge] queue changed during synthesis (edit/delete/reorder) — aborting merge')
+      return downstream
+    }
 
     // Consolidation succeeded: now durably pull out EXACTLY the snapshotted
     // queued prompts (pendingSnapshot.length, not the live length) so messages
@@ -242,9 +352,11 @@ export function apply(ctx: any, config: Config): void {
     // claimed batch (its content is consolidated into the new prompt).
     const contextMsgs = enter.messages.slice(messages.length)
     // The consolidated prompt IS the new official user message of this turn.
+    // Its source carries the merge provenance (count + original texts) so the
+    // UI can render a "merged N messages · view originals" affordance.
     const consolidatedMessage = createUserMessage({
       content: [{ type: 'text', text: consolidated }],
-      source: SYNTHESIS_SOURCE,
+      source: mergedSource(all),
     })
     return {
       kind: 'enter',
@@ -300,7 +412,7 @@ async function synthesizeBrief(
           type: 'text',
           text: `${SYNTHESIS_INSTRUCTION}\nLanguage: write the consolidated prompt in ${localeDirective(locale)}.\n\nQUEUED USER MESSAGES:\n${userBlocks}`,
         }],
-        source: SYNTHESIS_SOURCE,
+        source: { kind: 'user' },
       }),
     ]
 

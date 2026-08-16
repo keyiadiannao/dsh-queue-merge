@@ -49,9 +49,20 @@ Key properties:
   single new official user prompt — the agent acts on the consolidated version,
   and the raw messages do not appear in the turn. Corrections win over earlier
   messages on the same thing; unrelated requests are kept as separate points.
-- **Zero loss by construction.** The consolidation LLM call runs BEFORE the
-  inbox is touched. If it fails, the queued messages stay put and the official
+- **Transactional zero-loss.** The consolidation LLM call runs BEFORE the inbox
+  is touched. If it fails, the queued messages stay put and the official
   one-message-per-turn loop takes over — nothing is ever spliced out and dropped.
+  (Note: consolidation itself is a *lossy rewrite* by design — the model's
+  integrated understanding replaces the raw text. That is the accepted product
+  semantic; what is never lost is the *queue itself* on any failure.)
+- **Attachments are never merged.** A batch containing any non-text block
+  (image, file, …) or any non-human source (plugin/system messages) skips the
+  merge entirely and falls back to the official per-message processing — images
+  and files are never rewritten away.
+- **Queue-identity guard.** The snapshotted message IDs are re-checked against
+  the live queue right before the splice; if the user edited, deleted, or
+  reordered the queue during synthesis, the merge is aborted instead of
+  removing messages that were not part of the synthesis.
 - **No over-splice races.** The pending list is snapshotted at hook entry;
   messages that arrive mid-consolidation stay queued for the next turn.
 - **Language follows the UI.** The client reports the active locale; the
@@ -59,9 +70,14 @@ Key properties:
   en → English), falling back to the message language when unknown.
 - **One hard line:** the consolidation never invents permissions the user did
   not state, so merging cannot widen the agent's authority.
+- **Provenance badge.** The consolidated bubble is followed by a small badge —
+  "merged N follow-up messages · view originals" — where the ORIGINAL messages
+  remain inspectable, so the raw intent stays traceable.
 - **Interruptible UI.** The policy strip only appears when there are 2+ queued
   messages (with one, merge is a no-op) and sits in the composer's input dock
-  right under the native queue dock.
+  right under the native queue dock. Its mode and threshold come from the
+  server, so a `defaultMode: individually` or `minQueueForMerge: 5` config is
+  never shown wrong in the UI.
 
 ## Install
 
