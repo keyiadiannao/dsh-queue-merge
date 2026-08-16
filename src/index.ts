@@ -182,14 +182,15 @@ export function apply(ctx: any, config: Config): void {
   }), 'dsh-queue-merge: policy route')
 
   ctx.on('agent/pre-step', async ({ agent, messages, signal }: {
-    agent: { session: { id?: unknown }; inbox?: { nextTurn?: readonly { content?: unknown; id?: unknown }[]; splice?: (target: string, start: number, deleteCount: number, inserted: unknown[]) => unknown[] } };
+    agent: { session: { id?: unknown }; options?: { provider?: string; model?: string }; inbox?: { nextTurn?: readonly { content?: unknown; id?: unknown }[]; splice?: (target: string, start: number, deleteCount: number, inserted: unknown[]) => unknown[] } };
     messages: readonly { content?: unknown }[];
     signal?: AbortSignal;
   }, next: () => Promise<unknown>): Promise<unknown> => {
     // Only when there is actually an entering batch of user messages.
     if (messages.length === 0) return next()
     const sessionId = String(agent.session.id)
-    const policy = policies.get(sessionId)?.mode ?? config.defaultMode
+    const policyEntry = policies.get(sessionId)
+    const policy = policyEntry?.mode ?? config.defaultMode
     if (policy !== 'merge') return next()
 
     // The official loop claims ONE queued prompt per turn (inbox.nextTurn[0]).
@@ -214,7 +215,7 @@ export function apply(ctx: any, config: Config): void {
     // call fails, the pending messages stay queued and the official loop keeps
     // processing them one per turn — nothing is ever dropped.
     const all = [...messages, ...pendingSnapshot]
-    const consolidated = await synthesizeBrief(ctx, agent, all, config, signal, policy.locale)
+    const consolidated = await synthesizeBrief(ctx, agent, all, config, signal, policyEntry?.locale)
     // eslint-disable-next-line no-console
     console.log(`[dsh-queue-merge] consolidated=${consolidated === null ? 'FAILED(null)' : `ok(${consolidated.length} chars)`}`)
     if (consolidated === null) return downstream // consolidation failed → official behavior, zero loss
