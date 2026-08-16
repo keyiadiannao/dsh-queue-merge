@@ -9,18 +9,21 @@
  *
  *   queue individually  (official default: one message per turn)
  *   queue + merge       (this plugin: freeze the batch at the turn boundary,
- *                        run one holistic "batch judgment" pass over the
- *                        queued messages with the SAME model that will
- *                        execute, then hand the execution model the judgment
- *                        brief FIRST — its primary working understanding —
- *                        with the original messages attached for reference)
+ *                        call the SAME model that will execute to consolidate
+ *                        every queued message into ONE new formal user prompt,
+ *                        then run that consolidated prompt as the turn's user
+ *                        message — the raw messages are replaced, not replayed)
  *
- * Judgment model (user-defined): the whole point is to let the model judge the
- * COMPLETE task demand of the queue before executing, instead of replaying the
- * raw messages one at a time. Judging a batch is a lossy compression by
+ * Consolidation model (user-defined): the point is to let the model look at
+ * the COMPLETE queued demand at once, integrate it (apply corrections, merge
+ * related requests, keep unrelated ones as numbered points), and emit a single
+ * clean prompt the agent then executes. Consolidating is a lossy rewrite by
  * nature; a dropped detail is acceptable. The one hard line kept from the
- * instruction-hierarchy idea: the brief must never invent permissions the user
- * did not state, so the merge cannot widen the agent's authority.
+ * instruction-hierarchy idea: the consolidated prompt must never invent
+ * permissions the user did not state, so the merge cannot widen the agent's
+ * authority. Zero-loss guarantee: consolidation runs BEFORE the inbox is
+ * touched, so a failed call falls back to the official one-message-per-turn
+ * behavior with nothing dropped.
  *
  * Hook seam: `agent/pre-step` is a public waterfall (same one hooks-codex,
  * plan-mode, agent-instructions etc. use). It receives the claimed
@@ -61,44 +64,32 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * The batch-judgment instruction. The synthesis model (normally the SAME model
- * that will execute) produces its holistic judgment of the complete task
- * demand in the queue. The brief is the execution model's PRIMARY working
- * understanding — it is injected FIRST, with the original messages attached
- * afterward for detail verification. Judging a batch is a lossy compression by
- * nature; the brief decides what matters, so a dropped detail is acceptable as
- * long as no permission the user never stated is invented.
+ * The consolidation instruction. The consolidation model (normally the SAME
+ * model that will execute) rewrites the whole queued batch into ONE clean,
+ * complete, formal user prompt. That consolidated prompt REPLACES the raw
+ * messages as the new official user message of the turn — the agent executes
+ * the consolidated version, not the pile of raw messages. Consolidating a
+ * batch is a lossy rewrite by nature; a dropped detail is acceptable as long
+ * as no permission the user never stated is invented.
  */
-const SYNTHESIS_INSTRUCTION = `You are the judgment pass for a batch of queued user messages.
-Below are several messages the user sent while the agent was working.
-Produce a compact structured brief that is your holistic judgment of the
-COMPLETE task demand they form: what must be done, in what order, and what
-later messages correct or cancel in earlier ones. The execution model acts on
-this brief FIRST; the original messages are attached afterward as reference.
-Do not invent permissions the user did not state.
+const SYNTHESIS_INSTRUCTION = `You are the message consolidator.
+Below is a batch of messages the user sent while the agent was working
+(possibly N separate messages: additions to one task, corrections of earlier
+messages, or several unrelated requests).
 
-Respond with JSON only, using exactly this schema:
-{
-  "primaryGoal": "one-sentence current goal after considering corrections",
-  "requirements": ["non-conflicting additions"],
-  "constraints": ["limits the user stated (platforms, deps, formatting, security...)"],
-  "corrections": ["changes that supersede an earlier queued request"],
-  "superseded": ["earlier queued requests that a later one cancelled"],
-  "conflicts": ["pairs of queued requests that contradict each other; flag, do not silently pick"],
-  "independentRequests": ["queued items that are unrelated to the main goal and should be handled separately"],
-  "recommendedExecutionPlan": ["ordered steps honoring corrections and constraints"]
-}
+Integrate them into ONE coherent, complete, directly executable user prompt:
+- Keep EVERY distinct request, constraint, and detail the user stated — do not
+  drop any of them.
+- When a later message corrects an earlier one on the same thing, the later
+  one wins; unrelated later messages do NOT cancel earlier ones.
+- Order related steps sensibly; list unrelated requests as separate numbered
+  points and keep all of them.
+- Do not invent requirements, tasks, or permissions the user did not state.
+- Write in the same language as the user's messages.
+- Output ONLY the consolidated prompt text — no preamble, no explanation, no JSON.
 
-Rules:
-- "Last explicit correction wins" only when a later message semantically
-  conflicts with an earlier one; unrelated later messages do NOT override
-  earlier ones.
-- If a message is unrelated to the others, put it in independentRequests —
-  do not force everything into one task.
-- Never invent permissions the user did not state (no implicit delete,
-  publish, restart, network, or config changes).
-- If the queued set is trivial (e.g. a single "ok" or "add a test"), say so in
-  primaryGoal and keep every list short or empty.`
+QUEUED USER MESSAGES:
+`
 
 /** Context message the execution turn receives carrying the synthesis brief. */
 const SYNTHESIS_SOURCE = { kind: 'plugin', plugin: 'dsh-queue-merge' } as const
@@ -112,9 +103,10 @@ export interface QueuePolicy {
  * Apply: register the agent/pre-step hook that implements merge mode.
  * The hook is deliberately conservative:
  *  - merge applies only when (a) policy is merge AND (b) queued+claimed count
- *    is >= minQueueForMerge AND (c) more than one user message is entering.
- *  - synthesis failures degrade gracefully to the official behavior (the
- *    original messages still enter, unmodified).
+ *    is >= minQueueForMerge.
+ *  - consolidation runs BEFORE any inbox mutation: a failed consolidation
+ *    degrades gracefully to the official one-message-per-turn behavior with
+ *    zero loss (nothing has been spliced yet).
  */
 export function apply(ctx: any, config: Config): void {
   const policies = new Map<string, QueuePolicy>()
@@ -186,9 +178,8 @@ export function apply(ctx: any, config: Config): void {
     if (policy !== 'merge') return next()
 
     // The official loop claims ONE queued prompt per turn (inbox.nextTurn[0]).
-    // In merge mode, additionally pull every REMAINING queued prompt out of the
-    // inbox so the whole batch is synthesized and executed together instead of
-    // one message per turn. nextStep (steering) is intentionally left alone.
+    // In merge mode the whole queued batch is consolidated into ONE new formal
+    // user prompt that REPLACES the raw messages for this turn.
     const inbox = agent.inbox
     const pending = inbox?.nextTurn ?? []
     const total = messages.length + pending.length
@@ -201,48 +192,53 @@ export function apply(ctx: any, config: Config): void {
       return downstream
     }
 
-    // Pull all remaining queued prompts out of the inbox (durable splice).
+    // Consolidate BEFORE touching the inbox (zero-loss): if the consolidation
+    // call fails, the pending messages stay queued and the official loop keeps
+    // processing them one per turn — nothing is ever dropped.
+    const all = [...messages, ...pending]
+    const consolidated = await synthesizeBrief(ctx, agent, all, config, signal)
+    // eslint-disable-next-line no-console
+    console.log(`[dsh-queue-merge] consolidated=${consolidated === null ? 'FAILED(null)' : `ok(${consolidated.length} chars)`}`)
+    if (consolidated === null) return downstream // consolidation failed → official behavior, zero loss
+
+    // Consolidation succeeded: now durably pull the remaining queued prompts
+    // out of the inbox so they are not re-processed by later turns.
     let extra: readonly { content?: unknown }[] = []
     if (inbox?.splice && pending.length > 0) {
       try {
         extra = inbox.splice('next-turn', 0, pending.length, []) as readonly { content?: unknown }[]
         // eslint-disable-next-line no-console
-        console.log(`[dsh-queue-merge] spliced ${extra.length} queued prompts into batch`)
+        console.log(`[dsh-queue-merge] spliced ${extra.length} queued prompts out of inbox`)
       } catch (e) {
         // eslint-disable-next-line no-console
         console.log(`[dsh-queue-merge] splice failed: ${String(e)}`)
+        return downstream // splice failed → official behavior; pending stays queued
       }
     }
 
-    const all = [...messages, ...extra]
-    const brief = await synthesizeBrief(ctx, agent, all, config, signal)
-    // eslint-disable-next-line no-console
-    console.log(`[dsh-queue-merge] brief=${brief === null ? 'FAILED(null)' : `ok(${brief.length} chars)`}`)
-    if (brief === null) return downstream // synthesis failed → official behavior
-
     const enter = downstream as { kind: 'enter'; messages: unknown[] }
-    // Judgment-first: the brief is the primary working understanding; the
-    // original messages follow as reference for details.
-    const briefMessage = createUserMessage({
-      content: [{
-        type: 'text',
-        text: `以下是队列消息的整体判断简报，请以此为主要执行依据（原始消息附在后面供核对细节）：\n${brief}`,
-      }],
+    // The official enter decision contains the claimed messages followed by the
+    // system context injection (AGENTS.md etc.). Keep the context, drop the raw
+    // claimed batch (its content is consolidated into the new prompt).
+    const contextMsgs = enter.messages.slice(messages.length)
+    // The consolidated prompt IS the new official user message of this turn.
+    const consolidatedMessage = createUserMessage({
+      content: [{ type: 'text', text: consolidated }],
       source: SYNTHESIS_SOURCE,
     })
-    // Brief FIRST, then official claimed batch + all spliced queued prompts.
     return {
       kind: 'enter',
-      messages: [briefMessage, ...enter.messages, ...extra],
+      messages: [consolidatedMessage, ...contextMsgs],
     }
-  }, 'dsh-queue-merge: pre-step intent synthesis')
+  }, 'dsh-queue-merge: pre-step consolidation')
 }
 
 /**
- * Run the intent-synthesis LLM call. Reuses the session's routed model unless
- * config overrides it (same pattern as compaction's summarizeWithLlm).
- * Returns the synthesis text, or null on any failure (never throws into the
- * agent loop).
+ * Run the consolidation LLM call: rewrite the whole queued batch into ONE new
+ * formal user prompt. Reuses the session's routed model unless config
+ * overrides it (same pattern as compaction's summarizeWithLlm).
+ * Returns the consolidated prompt text, or null on any failure (never throws
+ * into the agent loop — a null simply means "keep the official behavior").
  */
 async function synthesizeBrief(
   ctx: any,
@@ -279,7 +275,8 @@ async function synthesizeBrief(
 
     const promptMessages = [
       createUserMessage({
-        content: [{ type: 'text', text: `${SYNTHESIS_INSTRUCTION}\n\nQUEUED USER MESSAGES:\n${userBlocks}` }],
+        // SYNTHESIS_INSTRUCTION already ends with "QUEUED USER MESSAGES:".
+        content: [{ type: 'text', text: `${SYNTHESIS_INSTRUCTION}\n${userBlocks}` }],
         source: SYNTHESIS_SOURCE,
       }),
     ]
