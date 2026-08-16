@@ -42,8 +42,10 @@ export type QueuePolicyBarProps =
 /** Policy endpoint on the host. */
 const POLICY = '/api/dsh-queue-merge/policy'
 
-/** Only render while the agent is busy AND at least one message is queued —
- * zero footprint when idle. */
+/** Only render while the agent is busy AND at least two messages are queued.
+ * With a single queued message the merge/individually choice is a no-op (the
+ * host merges only when claimed + pending >= minQueueForMerge, default 2), so
+ * the bar stays hidden until there is something to choose. */
 export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   const { t, session } = props
   const [mode, setModeState] = useState<'merge' | 'individually'>('merge')
@@ -56,7 +58,7 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   // the user never clicks a mode button. Hooks run unconditionally (before the
   // early return below) to keep React's hook order stable across renders.
   useEffect(() => {
-    if (sessionId === '' || !session.running || queued.length === 0) return
+    if (sessionId === '' || !session.running || queued.length < 2) return
     void fetch(POLICY, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -64,7 +66,7 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
     }).catch(() => { /* non-fatal: consolidation falls back to message-language */ })
   }, [sessionId, locale, session.running, queued.length])
 
-  if (!session.running || queued.length === 0) return null
+  if (!session.running || queued.length < 2) return null
 
   const setMode = (next: 'merge' | 'individually'): void => {
     setModeState(next)
