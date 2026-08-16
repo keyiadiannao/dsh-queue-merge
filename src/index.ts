@@ -165,19 +165,41 @@ export function apply(ctx: any, config: Config): void {
     },
   }), 'dsh-queue-merge: policy route')
 
-  ctx.on('agent/pre-step', async ({ agent, messages, signal }: { agent: { session: { id?: unknown } }; messages: readonly { content?: unknown }[]; signal?: AbortSignal }, next: () => Promise<unknown>): Promise<unknown> => {
+  ctx.on('agent/pre-step', async ({ agent, messages, signal }: {
+    agent: { session: { id?: unknown }; inbox?: { nextTurn?: readonly { content?: unknown; id?: unknown }[]; splice?: (target: string, start: number, deleteCount: number, inserted: unknown[]) => unknown[] } };
+    messages: readonly { content?: unknown }[];
+    signal?: AbortSignal;
+  }, next: () => Promise<unknown>): Promise<unknown> => {
     // Only when there is actually an entering batch of user messages.
     if (messages.length === 0) return next()
-    const policy = policies.get(String(agent.session.id))?.mode ?? config.defaultMode
+    const sessionId = String(agent.session.id)
+    const policy = policies.get(sessionId)?.mode ?? config.defaultMode
     if (policy !== 'merge') return next()
-    if (messages.length < Math.max(1, config.minQueueForMerge)) return next()
+
+    // The official loop claims ONE queued prompt per turn (inbox.nextTurn[0]).
+    // In merge mode, additionally pull every REMAINING queued prompt out of the
+    // inbox so the whole batch is synthesized and executed together instead of
+    // one message per turn. nextStep (steering) is intentionally left alone.
+    const inbox = agent.inbox
+    const pending = inbox?.nextTurn ?? []
+    const total = messages.length + pending.length
+    if (total < Math.max(1, config.minQueueForMerge)) return next()
 
     const downstream = await next()
     if (downstream === null || typeof downstream !== 'object' || (downstream as { kind?: string }).kind !== 'enter') {
       return downstream
     }
 
-    const brief = await synthesizeBrief(ctx, agent, messages, config, signal)
+    // Pull all remaining queued prompts out of the inbox (durable splice).
+    let extra: readonly { content?: unknown }[] = []
+    if (inbox?.splice && pending.length > 0) {
+      try {
+        extra = inbox.splice('next-turn', 0, pending.length, []) as readonly { content?: unknown }[]
+      } catch { /* splice failed → keep official behavior for the remainder */ }
+    }
+
+    const all = [...messages, ...extra]
+    const brief = await synthesizeBrief(ctx, agent, all, config, signal)
     if (brief === null) return downstream // synthesis failed → official behavior
 
     const enter = downstream as { kind: 'enter'; messages: unknown[] }
@@ -185,9 +207,10 @@ export function apply(ctx: any, config: Config): void {
       content: [{ type: 'text', text: brief }],
       source: SYNTHESIS_SOURCE,
     })
+    // Official claimed batch + all spliced queued prompts + advisory brief.
     return {
       kind: 'enter',
-      messages: [...enter.messages, briefMessage],
+      messages: [...enter.messages, ...extra, briefMessage],
     }
   }, 'dsh-queue-merge: pre-step intent synthesis')
 }
