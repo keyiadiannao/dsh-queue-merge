@@ -47,23 +47,24 @@ const POLICY = '/api/dsh-queue-merge/policy'
 export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
   const { t, session } = props
   const [mode, setModeState] = useState<'merge' | 'individually'>('merge')
-  const queued = session.queue.filter(q => q.placement === 'queued')
-  if (!session.running || queued.length === 0) return null
-
   const sessionId = props.sessionId ?? (session as { id?: string }).id ?? ''
   const locale = props.locale ?? 'zh'
+  const queued = session.queue.filter(q => q.placement === 'queued')
 
   // Report the active UI locale as soon as the bar appears, so the host knows
   // which language the consolidated prompt should be written in — even when
-  // the user never clicks a mode button.
+  // the user never clicks a mode button. Hooks run unconditionally (before the
+  // early return below) to keep React's hook order stable across renders.
   useEffect(() => {
-    if (sessionId === '') return
+    if (sessionId === '' || !session.running || queued.length === 0) return
     void fetch(POLICY, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ sessionId, locale }),
     }).catch(() => { /* non-fatal: consolidation falls back to message-language */ })
-  }, [sessionId, locale])
+  }, [sessionId, locale, session.running, queued.length])
+
+  if (!session.running || queued.length === 0) return null
 
   const setMode = (next: 'merge' | 'individually'): void => {
     setModeState(next)
