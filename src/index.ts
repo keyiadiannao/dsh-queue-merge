@@ -27,7 +27,7 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 
 export const name = 'dsh-queue-merge'
 
@@ -183,6 +183,8 @@ export function apply(ctx: any, config: Config): void {
     const inbox = agent.inbox
     const pending = inbox?.nextTurn ?? []
     const total = messages.length + pending.length
+    // eslint-disable-next-line no-console
+    console.log(`[dsh-queue-merge] pre-step: session=${sessionId.slice(0,8)} policy=${policy} entering=${messages.length} pendingNextTurn=${pending.length} total=${total} min=${config.minQueueForMerge}`)
     if (total < Math.max(1, config.minQueueForMerge)) return next()
 
     const downstream = await next()
@@ -195,11 +197,18 @@ export function apply(ctx: any, config: Config): void {
     if (inbox?.splice && pending.length > 0) {
       try {
         extra = inbox.splice('next-turn', 0, pending.length, []) as readonly { content?: unknown }[]
-      } catch { /* splice failed → keep official behavior for the remainder */ }
+        // eslint-disable-next-line no-console
+        console.log(`[dsh-queue-merge] spliced ${extra.length} queued prompts into batch`)
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.log(`[dsh-queue-merge] splice failed: ${String(e)}`)
+      }
     }
 
     const all = [...messages, ...extra]
     const brief = await synthesizeBrief(ctx, agent, all, config, signal)
+    // eslint-disable-next-line no-console
+    console.log(`[dsh-queue-merge] brief=${brief === null ? 'FAILED(null)' : `ok(${brief.length} chars)`}`)
     if (brief === null) return downstream // synthesis failed → official behavior
 
     const enter = downstream as { kind: 'enter'; messages: unknown[] }
@@ -238,7 +247,11 @@ async function synthesizeBrief(
       ? { provider: agent.options.provider, model: agent.options.model }
       : undefined
     const target = configured ?? latest ?? agentTarget
-    if (target === undefined) return null
+    if (target === undefined) {
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-queue-merge] synthesis: no provider/model (configured=${config.synthesisProvider}/${config.synthesisModel} latest=${JSON.stringify(latest)} agent=${agent.options.provider}/${agent.options.model})`)
+      return null
+    }
 
     const userBlocks = messages.map((m, i) => {
       const content = (m as { content?: unknown }).content
@@ -257,22 +270,29 @@ async function synthesizeBrief(
       }),
     ]
 
-    const collected: string[] = []
+    const assembler = new BlockAssembler()
     const options = {
       provider: target.provider,
       model: target.model,
       messages: promptMessages,
       maxTokens: 800,
       sessionId: agent.session.id,
-      purpose: 'queue-synthesis',
+      // 'compaction' is the closest registered auxiliary purpose (the schema
+      // only admits 'compaction' | 'session-title'); a custom value would be
+      // rejected by adapters at runtime.
+      purpose: 'compaction' as const,
       ...signal === undefined ? {} : { signal },
     }
-    for await (const chunk of ctx.llm.stream(options)) {
-      const c = chunk as { type?: string; text?: string }
-      if (c.type === 'text' && typeof c.text === 'string') collected.push(c.text)
-    }
-    return collected.join('').trim() || null
-  } catch {
+    for await (const chunk of ctx.llm.stream(options)) assembler.push(chunk)
+    const text = assembler.blocks()
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { text?: string }).text ?? '')
+      .join('')
+      .trim()
+    return text.length > 0 ? text : null
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.log(`[dsh-queue-merge] synthesis error: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
 }
