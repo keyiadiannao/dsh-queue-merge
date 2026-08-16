@@ -181,10 +181,13 @@ export function apply(ctx: any, config: Config): void {
     // In merge mode the whole queued batch is consolidated into ONE new formal
     // user prompt that REPLACES the raw messages for this turn.
     const inbox = agent.inbox
-    const pending = inbox?.nextTurn ?? []
-    const total = messages.length + pending.length
+    // SNAPSHOT the pending list once, at hook entry: `inbox.nextTurn` is a live
+    // array reference, and a message appended DURING the consolidation call
+    // must NOT be pulled into this batch — it stays queued for the next turn.
+    const pendingSnapshot = [...(inbox?.nextTurn ?? [])]
+    const total = messages.length + pendingSnapshot.length
     // eslint-disable-next-line no-console
-    console.log(`[dsh-queue-merge] pre-step: session=${sessionId.slice(0,8)} policy=${policy} entering=${messages.length} pendingNextTurn=${pending.length} total=${total} min=${config.minQueueForMerge}`)
+    console.log(`[dsh-queue-merge] pre-step: session=${sessionId.slice(0,8)} policy=${policy} entering=${messages.length} pendingNextTurn=${pendingSnapshot.length} total=${total} min=${config.minQueueForMerge}`)
     if (total < Math.max(1, config.minQueueForMerge)) return next()
 
     const downstream = await next()
@@ -195,18 +198,19 @@ export function apply(ctx: any, config: Config): void {
     // Consolidate BEFORE touching the inbox (zero-loss): if the consolidation
     // call fails, the pending messages stay queued and the official loop keeps
     // processing them one per turn — nothing is ever dropped.
-    const all = [...messages, ...pending]
+    const all = [...messages, ...pendingSnapshot]
     const consolidated = await synthesizeBrief(ctx, agent, all, config, signal)
     // eslint-disable-next-line no-console
     console.log(`[dsh-queue-merge] consolidated=${consolidated === null ? 'FAILED(null)' : `ok(${consolidated.length} chars)`}`)
     if (consolidated === null) return downstream // consolidation failed → official behavior, zero loss
 
-    // Consolidation succeeded: now durably pull the remaining queued prompts
-    // out of the inbox so they are not re-processed by later turns.
+    // Consolidation succeeded: now durably pull out EXACTLY the snapshotted
+    // queued prompts (pendingSnapshot.length, not the live length) so messages
+    // that arrived mid-consolidation stay queued for the next turn.
     let extra: readonly { content?: unknown }[] = []
-    if (inbox?.splice && pending.length > 0) {
+    if (inbox?.splice && pendingSnapshot.length > 0) {
       try {
-        extra = inbox.splice('next-turn', 0, pending.length, []) as readonly { content?: unknown }[]
+        extra = inbox.splice('next-turn', 0, pendingSnapshot.length, []) as readonly { content?: unknown }[]
         // eslint-disable-next-line no-console
         console.log(`[dsh-queue-merge] spliced ${extra.length} queued prompts out of inbox`)
       } catch (e) {
