@@ -1,0 +1,5 @@
+# dsh-queue-merge bundle patch: mount into the profile.
+- insert:
+    - id: dsh-queue-merge
+      name: 'dsh-queue-merge'
+
