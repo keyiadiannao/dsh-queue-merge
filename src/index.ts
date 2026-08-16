@@ -262,7 +262,7 @@ export function apply(ctx: any, config: Config): void {
  */
 async function synthesizeBrief(
   ctx: any,
-  agent: { session: { requestHeader?: () => { config?: { provider?: string; model?: string } }; id?: unknown }; options: { provider?: string; model?: string } },
+  agent: { session: { requestHeader?: () => { config?: { provider?: string; model?: string } }; id?: unknown }; options?: { provider?: string; model?: string } },
   messages: readonly { content: unknown; id?: unknown }[],
   config: Config,
   signal?: AbortSignal,
@@ -273,14 +273,14 @@ async function synthesizeBrief(
     const configured = config.synthesisProvider.length > 0 && config.synthesisModel.length > 0
       ? { provider: config.synthesisProvider, model: config.synthesisModel }
       : undefined
-    const agentTarget = agent.options.provider !== undefined && agent.options.provider.length > 0
-      && agent.options.model !== undefined && agent.options.model.length > 0
+    const agentTarget = agent.options?.provider !== undefined && agent.options.provider.length > 0
+      && agent.options?.model !== undefined && agent.options.model.length > 0
       ? { provider: agent.options.provider, model: agent.options.model }
       : undefined
     const target = configured ?? latest ?? agentTarget
     if (target === undefined) {
       // eslint-disable-next-line no-console
-      console.log(`[dsh-queue-merge] synthesis: no provider/model (configured=${config.synthesisProvider}/${config.synthesisModel} latest=${JSON.stringify(latest)} agent=${agent.options.provider}/${agent.options.model})`)
+      console.log(`[dsh-queue-merge] synthesis: no provider/model (configured=${config.synthesisProvider}/${config.synthesisModel} latest=${JSON.stringify(latest)} agent=${agent.options?.provider}/${agent.options?.model})`)
       return null
     }
 
