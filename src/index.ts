@@ -91,8 +91,11 @@ Integrate them into ONE coherent, complete, directly executable user prompt:
 QUEUED USER MESSAGES:
 `
 
-/** Context message the execution turn receives carrying the synthesis brief. */
-const SYNTHESIS_SOURCE = { kind: 'plugin', plugin: 'dsh-queue-merge' } as const
+/** Source marker for the consolidated wake message. `kind: 'user'` makes the
+ * UI render it as a full, visible user bubble (source.kind !== 'user' would
+ * render as a collapsed "context injection" tag, hiding the consolidated
+ * prompt from the user — which is exactly what we must not do). */
+const SYNTHESIS_SOURCE = { kind: 'user' } as const
 
 /** Per-session queue policy, switchable from the client while busy. */
 export interface QueuePolicy {
