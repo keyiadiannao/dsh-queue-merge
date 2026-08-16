@@ -2,8 +2,9 @@
  * dsh-queue-merge browser half: the queue-policy bar above the composer card
  * (`conversation.input.dock`, right under the native queue dock — the seat the
  * slot contract reserves for content that needs its own line and carries
- * prose / clickable controls). Shows only while the agent is busy and messages
- * are queued; lets the user pick merge vs individually for the next batch.
+ * prose / clickable controls). Shows only while the agent is busy and at least
+ * two messages are queued; lets the user pick merge vs individually for the
+ * next batch.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
@@ -23,8 +24,40 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
+/**
+ * The standalone plugin typecheck cannot see the host DSH SlotMap extension
+ * (only the default `'root'` slot exists in the empty SlotMap). The runtime
+ * slot table DOES declare `conversation.input.dock` (see
+ * packages/client/ui-conversation/src/client/apply.ts); this augmentation is
+ * our self-contained view of that contract so `slots.inject/register` and the
+ * component props typecheck standalone.
+ */
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'conversation.input.dock': {
+      kind: 'list'
+      scope: 'session'
+      owner: {
+        session: {
+          id?: string
+          running: boolean
+          queue: readonly { placement?: string }[]
+        }
+      }
+    }
+  }
+}
+
+/** Locale-capable view of the injected client context (see `inject` above). */
+interface LocaleAwareContext {
+  locale?: {
+    getLocale?: () => { active?: string }
+    register?: (ns: string, dicts: unknown) => () => void
+  }
+}
+
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-queue-merge: dictionaries')
+  ctx.effect(() => (ctx as unknown as LocaleAwareContext).locale?.register?.(NS, { zh, en }) ?? (() => {}), 'dsh-queue-merge: dictionaries')
 
   // The native queue dock registers at order 20; the policy bar follows it at
   // order 30 so the user first sees the queued messages, then decides how the
@@ -37,7 +70,7 @@ export function apply(ctx: ClientContext): void {
       order: 30,
       locale: NS,
       inject: () => ({
-        locale: (ctx.locale as { getLocale?: () => { active?: string } }).getLocale?.()?.active ?? 'zh',
+        locale: (ctx as unknown as LocaleAwareContext).locale?.getLocale?.()?.active ?? 'zh',
       }),
     }, QueuePolicyBar))
 }

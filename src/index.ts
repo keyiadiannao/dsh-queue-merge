@@ -129,7 +129,7 @@ export function apply(ctx: any, config: Config): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: BASE,
-    handler: async (req, res) => {
+    handler: async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
       if (req.method !== 'POST') {
         res.writeHead(405, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: 'method not allowed' }))
@@ -263,7 +263,7 @@ export function apply(ctx: any, config: Config): void {
 async function synthesizeBrief(
   ctx: any,
   agent: { session: { requestHeader?: () => { config?: { provider?: string; model?: string } }; id?: unknown }; options?: { provider?: string; model?: string } },
-  messages: readonly { content: unknown; id?: unknown }[],
+  messages: readonly { content?: unknown; id?: unknown }[],
   config: Config,
   signal?: AbortSignal,
   locale?: string,

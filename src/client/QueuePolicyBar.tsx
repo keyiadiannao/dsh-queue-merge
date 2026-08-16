@@ -16,7 +16,7 @@ import css from './QueuePolicyBar.module.css'
 
 /** Inline queue row shape (subset of the runtime's QueuedMessage). */
 export interface QueueRow {
-  readonly placement: 'queued' | 'steering' | 'context' | string
+  readonly placement?: 'queued' | 'steering' | 'context' | string
 }
 
 /** Inline session snapshot shape (subset of the runtime's ConversationSnapshot). */
@@ -34,8 +34,7 @@ export interface QueueInputZone {
 }
 
 export type QueuePolicyBarProps =
-  PropsRuntime<'conversation.input.dock'>
-  & QueueInputZone
+  QueueInputZone
   & PropsLocale<typeof NS>
   & { sessionId?: string; locale?: string }
 
