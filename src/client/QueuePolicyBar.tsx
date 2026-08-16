@@ -1,7 +1,8 @@
 /**
- * Queue policy bar — rendered in the composer dock (`conversation.composer.dock`)
- * while the agent is busy and messages are queued. Lets the user choose how
- * the queued batch will be consumed when the current task ends:
+ * Queue policy bar — rendered in the input dock (`conversation.input.dock`,
+ * above the composer card, right under the native queue dock) while the agent
+ * is busy and messages are queued. Lets the user choose how the queued batch
+ * will be consumed when the current task ends:
  *   merge        → intent synthesis, one combined execution (this plugin)
  *   individually → official one-message-per-turn behavior
  * The choice is POSTed to the host per-session; the host's agent/pre-step hook
@@ -24,7 +25,7 @@ export interface QueueSessionSnapshot {
   readonly id?: string
 }
 
-/** The InputZone owner share the composer.dock slot injects; declared inline
+/** The InputZone owner share the input.dock slot injects; declared inline
  * because the standalone typecheck does not see the DSH SlotMap extension
  * (same pattern as the power-button plugin's other slot components). */
 export interface QueueInputZone {
@@ -32,7 +33,7 @@ export interface QueueInputZone {
 }
 
 export type QueuePolicyBarProps =
-  PropsRuntime<'conversation.composer.dock'>
+  PropsRuntime<'conversation.input.dock'>
   & QueueInputZone
   & PropsLocale<typeof NS>
   & { sessionId?: string }
@@ -87,9 +88,6 @@ export function QueuePolicyBar(props: QueuePolicyBarProps): JSX.Element | null {
         lineHeight: 1.5,
       }}
     >
-      <span style={{ flexShrink: 0 }}>
-        {t('queueCount').replace('{n}', String(queued.length))}
-      </span>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {mode === 'merge' ? t('willMerge') : t('willIndividually')}
       </span>
