@@ -11,10 +11,10 @@ The official DSH agent loop consumes **one queued prompt per turn**. If you
 queue four follow-ups while the agent is mid-task:
 
 ```text
-① 另外别用表格
-② 对了，要考虑 Windows
-③ 代码最好 TypeScript
-④ 前面说的方案 B 不要了
+① no tables, please
+② by the way, we need to consider Windows
+③ prefer TypeScript for the code
+④ drop option B from the earlier proposal
 ```
 
 …they become four separate turns, which invites piecemeal rework. This plugin
@@ -30,7 +30,7 @@ queue + merge        (this plugin: consolidate the batch, execute once)
 ```text
 agent busy, user queues 2+ messages
         ↓
-policy strip above the composer:  [合并处理]  [逐条处理]   (shown only when 2+ queued)
+policy strip above the composer:  [Merge]  [Individually]   (shown only when 2+ queued)
         ↓  (merge)
 agent/pre-step hook at the turn boundary
         ↓
